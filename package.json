@@ -1,0 +1,23 @@
+{
+  "name": "profile-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node --env-file-if-exists=.env.local --test",
+    "test:db": "node --env-file-if-exists=.env.local --test test/db.test.mjs"
+  },
+  "dependencies": {
+    "mongodb": "^6.6.0",
+    "next": "^16.2.3",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "uuidv7": "^0.6.3"
+  }
+}
