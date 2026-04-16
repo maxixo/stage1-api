@@ -194,7 +194,7 @@ test('connectDB resets the cache after a failed attempt', async () => {
 
 test(
   'connects to the live database when MONGO_URI is configured',
-  { skip: !process.env.MONGO_URI },
+  { skip: !process.env.MONGO_URI || process.env.RUN_LIVE_DB_TEST !== '1' },
   async () => {
     const manager = createDbClientManager({
       mongoUri: process.env.MONGO_URI,

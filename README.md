@@ -20,18 +20,26 @@ npm start
 
 ## Endpoint
 ```http
-GET /api/profiles?name=ella
+GET /api/profiles
+
+GET /api/profiles?gender=male&country_id=NG&age_group=adult
+
+GET /api/profiles/{id}
 
 POST /api/profiles
 Content-Type: application/json
 
 { "name": "ella" }
+
+DELETE /api/profiles/{id}
 ```
 
-## Lookup Behavior
-- `GET /api/profiles?name=ella` returns the stored profile, or enriches and stores it on first request
-- `GET /api/profiles` returns `400 Bad Request` when `name` is missing
-- `GET /api/profiles?name=unknown` returns a provider error if the external APIs cannot supply enough data
+## Behavior
+- `POST /api/profiles` enriches the submitted name and stores the processed profile
+- repeated `POST` requests for the same normalized name return `200 OK` with `Profile already exists`
+- `GET /api/profiles/{id}` returns a single stored profile by public id
+- `GET /api/profiles` returns all profiles or filters by `gender`, `country_id`, and `age_group`
+- `DELETE /api/profiles/{id}` removes a stored profile by public id
 
 ## Environment Variables
 | Variable | Description |
@@ -39,12 +47,13 @@ Content-Type: application/json
 | `MONGO_URI` | MongoDB connection string |
 
 ## Response Behavior
-- `200 OK` for a successful `GET` lookup or first-time `GET` enrichment
+- `200 OK` for a successful list request, id lookup, or idempotent create
 - `201 Created` for a newly inserted profile
-- `200 OK` with `Profile already exists` for idempotent repeats
-- `400 Bad Request` for invalid JSON or missing/empty names
-- `422 Unprocessable Entity` for non-string names
-- `502 Bad Gateway` for external enrichment failures or missing enrichment data
+- `204 No Content` for a successful profile deletion
+- `404 Not Found` when a profile does not exist
+- `400 Bad Request` for invalid JSON or missing/empty names or ids
+- `422 Unprocessable Entity` for non-string names or ids
+- `502 Bad Gateway` for invalid external API responses or upstream failures
 - `500 Internal Server Error` for unexpected database or server errors
 
 ## External APIs
@@ -59,4 +68,5 @@ Content-Type: application/json
 - Browser extension DOM injection warnings are suppressed at the `<body>` level in development
 - All IDs are UUID v7 strings
 - All timestamps are UTC ISO 8601 strings without milliseconds
-- CORS headers are returned on `GET`, `POST`, `OPTIONS`, and all error responses
+- Invalid upstream payloads return service-specific `502` messages for `Genderize`, `Agify`, or `Nationalize`
+- CORS headers are returned on `GET`, `POST`, `DELETE`, `OPTIONS`, and all error responses

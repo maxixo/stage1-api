@@ -12,6 +12,8 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+const FILTER_KEYS = ['gender', 'country_id', 'age_group'];
+
 function formatDocument(doc) {
   return {
     id: doc.id,
@@ -40,6 +42,17 @@ function successPayload(doc, message) {
   return payload;
 }
 
+function formatListDocument(doc) {
+  return {
+    id: doc.id,
+    name: doc.name,
+    gender: doc.gender,
+    age: doc.age,
+    age_group: doc.age_group,
+    country_id: doc.country_id,
+  };
+}
+
 function normalizeName(name, requiredMessage = 'Name is required') {
   if (name === undefined || name === null || name === '') {
     return { error: { status: 400, message: requiredMessage } };
@@ -56,6 +69,47 @@ function normalizeName(name, requiredMessage = 'Name is required') {
   }
 
   return { normalizedName };
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getSearchParam(searchParams, key) {
+  for (const [entryKey, value] of searchParams.entries()) {
+    if (entryKey.toLowerCase() === key) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function normalizeFilterValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalizedValue = value.trim();
+
+  return normalizedValue === '' ? null : normalizedValue;
+}
+
+function buildProfilesFilter(searchParams) {
+  const filter = {};
+
+  for (const key of FILTER_KEYS) {
+    const rawValue = getSearchParam(searchParams, key);
+    const normalizedValue = normalizeFilterValue(rawValue);
+
+    if (!normalizedValue) {
+      continue;
+    }
+
+    filter[key] = new RegExp(`^${escapeRegex(normalizedValue)}$`, 'i');
+  }
+
+  return filter;
 }
 
 function createResponseHelpers(NextResponseClass) {
@@ -95,31 +149,28 @@ function createProfilesRouteHandlers({
   }
 
   async function GET(request) {
-    const nameParam = new URL(request.url).searchParams.get('name');
-    const { normalizedName, error } = normalizeName(
-      nameParam,
-      'Name query parameter is required'
-    );
-
-    if (error) {
-      return errorResponse(error.status, error.message);
-    }
-
     const collection = await getConnectedCollection();
 
     if (!collection) {
       return errorResponse(500, 'Database error');
     }
 
-    return resolveProfileRequest({
-      collection,
-      normalizedName,
-      createWhenMissing: true,
-      createdMessage: 'Profile created',
-      createdStatus: 200,
-      existingMessage: undefined,
-      raceMessage: 'Profile already exists',
-    });
+    const filter = buildProfilesFilter(new URL(request.url).searchParams);
+
+    try {
+      const docs = await collection.find(filter).toArray();
+
+      return successResponse(
+        {
+          status: 'success',
+          count: docs.length,
+          data: docs.map(formatListDocument),
+        },
+        200
+      );
+    } catch {
+      return errorResponse(500, 'Database error');
+    }
   }
 
   async function POST(request) {
@@ -143,37 +194,18 @@ function createProfilesRouteHandlers({
       return errorResponse(500, 'Database error');
     }
 
-    return resolveProfileRequest({
-      collection,
-      normalizedName,
-      createWhenMissing: true,
-      createdStatus: 201,
-      existingMessage: 'Profile already exists',
-      raceMessage: 'Profile already exists',
-    });
+    return createProfile({ collection, normalizedName });
   }
 
-  async function resolveProfileRequest({
-    collection,
-    normalizedName,
-    createWhenMissing,
-    createdMessage,
-    createdStatus,
-    existingMessage,
-    raceMessage,
-  }) {
+  async function createProfile({ collection, normalizedName }) {
     try {
       const existing = await collection.findOne({ name: normalizedName });
 
       if (existing) {
-        return successResponse(successPayload(existing, existingMessage), 200);
+        return successResponse(successPayload(existing, 'Profile already exists'), 200);
       }
     } catch {
       return errorResponse(500, 'Database error');
-    }
-
-    if (!createWhenMissing) {
-      return errorResponse(404, 'Profile not found');
     }
 
     let enriched;
@@ -228,7 +260,7 @@ function createProfilesRouteHandlers({
             return errorResponse(500, 'Database error');
           }
 
-          return successResponse(successPayload(existing, raceMessage), 200);
+          return successResponse(successPayload(existing, 'Profile already exists'), 200);
         } catch {
           return errorResponse(500, 'Database error');
         }
@@ -237,7 +269,7 @@ function createProfilesRouteHandlers({
       return errorResponse(500, 'Database error');
     }
 
-    return successResponse(successPayload(doc, createdMessage), createdStatus);
+    return successResponse(successPayload(doc), 201);
   }
 
   return {
@@ -253,4 +285,11 @@ export const GET = handlers.GET;
 export const OPTIONS = handlers.OPTIONS;
 export const POST = handlers.POST;
 
-export { createProfilesRouteHandlers, formatDocument, normalizeName, successPayload };
+export {
+  buildProfilesFilter,
+  createProfilesRouteHandlers,
+  formatDocument,
+  formatListDocument,
+  normalizeName,
+  successPayload,
+};

@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createProfilesRouteHandlers } from '../app/api/profiles/route.js';
+import {
+  buildProfilesFilter,
+  createProfilesRouteHandlers,
+} from '../app/api/profiles/route.js';
 
 function createCollection(overrides = {}) {
   return {
+    find: () => ({
+      toArray: async () => [],
+    }),
     findOne: async () => null,
     insertOne: async () => ({ acknowledged: true }),
     ...overrides,
@@ -13,20 +19,25 @@ function createCollection(overrides = {}) {
 function createHandlers({ collection, ...overrides } = {}) {
   return createProfilesRouteHandlers({
     getCollectionFn: async () => collection ?? createCollection(),
-    enrichProfileFn: async (name) => ({
+    enrichProfileFn: async () => ({
       gender: 'female',
       gender_probability: 0.98,
       sample_size: 1234,
       age: 28,
       country_id: 'NG',
       country_probability: 0.64,
-      name,
     }),
     classifyAgeGroupFn: (age) => (age >= 18 ? 'adult' : 'child'),
     createId: () => 'test-id',
     now: () => new Date('2026-04-15T08:00:00.000Z'),
     ...overrides,
   });
+}
+
+function assertExactCaseInsensitiveMatch(actual, expected) {
+  assert.ok(actual instanceof RegExp);
+  assert.equal(actual.source, `^${expected}$`);
+  assert.equal(actual.flags, 'i');
 }
 
 test('OPTIONS returns CORS headers for GET and POST', async () => {
@@ -41,107 +52,123 @@ test('OPTIONS returns CORS headers for GET and POST', async () => {
   );
 });
 
-test('GET requires the name query parameter', async () => {
-  const { GET } = createHandlers();
+test('buildProfilesFilter creates case-insensitive filters for supported params', () => {
+  const filter = buildProfilesFilter(
+    new URLSearchParams('Gender=MALE&country_id=ng&AGE_GROUP=adult&ignored=x')
+  );
+
+  assert.deepEqual(Object.keys(filter).sort(), ['age_group', 'country_id', 'gender']);
+  assertExactCaseInsensitiveMatch(filter.gender, 'MALE');
+  assertExactCaseInsensitiveMatch(filter.country_id, 'ng');
+  assertExactCaseInsensitiveMatch(filter.age_group, 'adult');
+});
+
+test('GET returns a filtered profile list with count', async () => {
+  let queriedFilter;
+  const { GET } = createHandlers({
+    collection: createCollection({
+      find: (filter) => {
+        queriedFilter = filter;
+        return {
+          toArray: async () => [
+            {
+              id: 'id-1',
+              name: 'emmanuel',
+              gender: 'male',
+              age: 25,
+              age_group: 'adult',
+              country_id: 'NG',
+              sample_size: 99,
+              country_probability: 0.8,
+              created_at: '2026-04-15T08:00:00Z',
+            },
+          ],
+        };
+      },
+    }),
+  });
+
+  const response = await GET(
+    new Request(
+      'http://localhost:3000/api/profiles?gender=MALE&country_id=ng&age_group=ADULT'
+    )
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assertExactCaseInsensitiveMatch(queriedFilter.gender, 'MALE');
+  assertExactCaseInsensitiveMatch(queriedFilter.country_id, 'ng');
+  assertExactCaseInsensitiveMatch(queriedFilter.age_group, 'ADULT');
+  assert.deepEqual(payload, {
+    status: 'success',
+    count: 1,
+    data: [
+      {
+        id: 'id-1',
+        name: 'emmanuel',
+        gender: 'male',
+        age: 25,
+        age_group: 'adult',
+        country_id: 'NG',
+      },
+    ],
+  });
+});
+
+test('GET returns all profiles when no supported filters are supplied', async () => {
+  let queriedFilter;
+  const { GET } = createHandlers({
+    collection: createCollection({
+      find: (filter) => {
+        queriedFilter = filter;
+        return {
+          toArray: async () => [
+            {
+              id: 'id-1',
+              name: 'emmanuel',
+              gender: 'male',
+              age: 25,
+              age_group: 'adult',
+              country_id: 'NG',
+            },
+            {
+              id: 'id-2',
+              name: 'sarah',
+              gender: 'female',
+              age: 28,
+              age_group: 'adult',
+              country_id: 'US',
+            },
+          ],
+        };
+      },
+    }),
+  });
 
   const response = await GET(new Request('http://localhost:3000/api/profiles'));
   const payload = await response.json();
 
-  assert.equal(response.status, 400);
-  assert.deepEqual(payload, {
-    status: 'error',
-    message: 'Name query parameter is required',
-  });
-});
-
-test('GET returns a stored profile by normalized name', async () => {
-  let enrichCalls = 0;
-  let queriedFilter;
-  const collection = createCollection({
-    findOne: async (filter) => {
-      queriedFilter = filter;
-      return {
-        id: 'profile-1',
-        name: 'ella',
-        gender: 'female',
-        gender_probability: 0.98,
-        sample_size: 1234,
-        age: 28,
-        age_group: 'adult',
-        country_id: 'NG',
-        country_probability: 0.64,
-        created_at: '2026-04-15T08:00:00Z',
-      };
-    },
-  });
-  const { GET } = createHandlers({
-    collection,
-    enrichProfileFn: async () => {
-      enrichCalls += 1;
-      return {};
-    },
-  });
-
-  const response = await GET(
-    new Request('http://localhost:3000/api/profiles?name=%20Ella%20')
-  );
-  const payload = await response.json();
-
   assert.equal(response.status, 200);
-  assert.deepEqual(queriedFilter, { name: 'ella' });
-  assert.equal(enrichCalls, 0);
-  assert.equal(payload.status, 'success');
-  assert.equal(payload.data.name, 'ella');
-});
-
-test('GET creates and stores a profile when it is missing', async () => {
-  const inserted = [];
-  let enrichName;
-  const { GET } = createHandlers({
-    collection: createCollection({
-      findOne: async () => null,
-      insertOne: async (doc) => {
-        inserted.push(doc);
-        return { acknowledged: true };
-      },
-    }),
-    enrichProfileFn: async (name) => {
-      enrichName = name;
-      return {
-        gender: 'male',
-        gender_probability: 0.97,
-        sample_size: 1400,
-        age: 31,
-        country_id: 'PK',
-        country_probability: 0.73,
-      };
+  assert.deepEqual(queriedFilter, {});
+  assert.equal(payload.count, 2);
+  assert.deepEqual(payload.data, [
+    {
+      id: 'id-1',
+      name: 'emmanuel',
+      gender: 'male',
+      age: 25,
+      age_group: 'adult',
+      country_id: 'NG',
     },
-  });
-
-  const response = await GET(
-    new Request('http://localhost:3000/api/profiles?name=%20Usman%20')
-  );
-  const payload = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.equal(enrichName, 'usman');
-  assert.equal(inserted.length, 1);
-  assert.deepEqual(inserted[0], {
-    _id: 'test-id',
-    id: 'test-id',
-    name: 'usman',
-    gender: 'male',
-    gender_probability: 0.97,
-    sample_size: 1400,
-    age: 31,
-    age_group: 'adult',
-    country_id: 'PK',
-    country_probability: 0.73,
-    created_at: '2026-04-15T08:00:00Z',
-  });
-  assert.equal(payload.status, 'success');
-  assert.equal(payload.message, 'Profile created');
-  assert.equal(payload.data.name, 'usman');
+    {
+      id: 'id-2',
+      name: 'sarah',
+      gender: 'female',
+      age: 28,
+      age_group: 'adult',
+      country_id: 'US',
+    },
+  ]);
 });
 
 test('POST creates a new enriched profile', async () => {
@@ -179,8 +206,21 @@ test('POST creates a new enriched profile', async () => {
     country_probability: 0.64,
     created_at: '2026-04-15T08:00:00Z',
   });
-  assert.equal(payload.status, 'success');
-  assert.equal(payload.data.name, 'ella');
+  assert.deepEqual(payload, {
+    status: 'success',
+    data: {
+      id: 'test-id',
+      name: 'ella',
+      gender: 'female',
+      gender_probability: 0.98,
+      sample_size: 1234,
+      age: 28,
+      age_group: 'adult',
+      country_id: 'NG',
+      country_probability: 0.64,
+      created_at: '2026-04-15T08:00:00Z',
+    },
+  });
 });
 
 test('POST returns an existing profile without reinserting duplicates', async () => {
@@ -219,4 +259,27 @@ test('POST returns an existing profile without reinserting duplicates', async ()
   assert.equal(insertCount, 0);
   assert.equal(payload.message, 'Profile already exists');
   assert.equal(payload.data.id, 'profile-1');
+});
+
+test('POST surfaces exact 502 errors from invalid upstream data', async () => {
+  const { POST } = createHandlers({
+    enrichProfileFn: async () => {
+      throw new Error('Genderize returned an invalid response');
+    },
+  });
+
+  const response = await POST(
+    new Request('http://localhost:3000/api/profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'ella' }),
+    })
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 502);
+  assert.deepEqual(payload, {
+    status: 'error',
+    message: 'Genderize returned an invalid response',
+  });
 });

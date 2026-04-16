@@ -1,32 +1,33 @@
 const endpoint = '/api/profiles';
-const lookupExample = '/api/profiles?name=ella';
+const filterExample = '/api/profiles?gender=male&country_id=NG';
+const idExample = '/api/profiles/b3f9c1e2-7d4a-4c91-9c2a-1f0a8e5b6d12';
 
 export default function HomePage() {
   return (
     <main style={styles.main}>
       <section style={styles.hero}>
         <p style={styles.kicker}>Profile API</p>
-        <h1 style={styles.title}>Name enrichment with direct lookup support.</h1>
+        <h1 style={styles.title}>Spec-compliant profile enrichment and retrieval.</h1>
         <p style={styles.description}>
           This service accepts a name, enriches it with gender, age, and
-          nationality signals, classifies the age group, and stores the result
-          idempotently in MongoDB.
+          nationality signals, classifies the age group, stores the result
+          idempotently in MongoDB, and exposes list, fetch, and delete routes.
         </p>
         <div style={styles.actions}>
           <a href={endpoint} style={styles.link}>
             Endpoint
           </a>
-          <a href={lookupExample} style={styles.secondaryLink}>
-            Sample GET
+          <a href={filterExample} style={styles.secondaryLink}>
+            Filtered GET
           </a>
-          <span style={styles.badge}>GET and POST</span>
+          <span style={styles.badge}>GET, POST, DELETE</span>
         </div>
       </section>
 
       <section style={styles.grid}>
         <article style={styles.card}>
-          <h2 style={styles.sectionTitle}>Lookup</h2>
-          <pre style={styles.code}>{`GET ${lookupExample}`}</pre>
+          <h2 style={styles.sectionTitle}>List</h2>
+          <pre style={styles.code}>{`GET ${filterExample}`}</pre>
         </article>
 
         <article style={styles.card}>
@@ -41,23 +42,35 @@ Content-Type: application/json
       </section>
 
       <section style={styles.grid}>
+        <article style={styles.card}>
+          <h2 style={styles.sectionTitle}>Fetch By ID</h2>
+          <pre style={styles.code}>{`GET ${idExample}`}</pre>
+        </article>
+
+        <article style={styles.card}>
+          <h2 style={styles.sectionTitle}>Delete</h2>
+          <pre style={styles.code}>{`DELETE ${idExample}`}</pre>
+        </article>
+      </section>
+
+      <section style={styles.grid}>
         <article style={styles.panel}>
           <h2 style={styles.sectionTitle}>Behavior</h2>
           <ul style={styles.list}>
             <li>Enriches from three external APIs concurrently</li>
             <li>Classifies age as child, teenager, adult, or senior</li>
-            <li>Creates missing profiles on `GET /api/profiles?name=...`</li>
-            <li>Prevents duplicates with MongoDB uniqueness and race guards</li>
+            <li>Lists stored profiles with optional case-insensitive filters</li>
+            <li>Prevents duplicates with MongoDB uniqueness and idempotent POST</li>
           </ul>
         </article>
 
         <article style={styles.panel}>
           <h2 style={styles.sectionTitle}>Responses</h2>
           <ul style={styles.list}>
-            <li>`200` for a successful GET lookup or first-time GET enrichment</li>
+            <li>`200` for successful GET list, GET by id, or repeated POST</li>
             <li>`201` for a new stored profile</li>
-            <li>`200` when the normalized profile already exists</li>
-            <li>`400`, `422`, `502`, or `500` for error paths</li>
+            <li>`204` for a successful delete</li>
+            <li>`400`, `422`, `404`, `502`, or `500` for error paths</li>
           </ul>
         </article>
       </section>
