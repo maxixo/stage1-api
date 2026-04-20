@@ -3,6 +3,7 @@ import { uuidv7 } from 'uuidv7';
 import { getCollection } from '../../../lib/db.js';
 import { enrichProfile } from '../../../lib/enrichment.js';
 import { classifyAgeGroup } from '../../../lib/classify.js';
+import { formatProfileDocument } from '../../../lib/profile-shape.js';
 
 export const runtime = 'nodejs';
 
@@ -14,20 +15,7 @@ const CORS_HEADERS = {
 
 const FILTER_KEYS = ['gender', 'country_id', 'age_group'];
 
-function formatDocument(doc) {
-  return {
-    id: doc.id,
-    name: doc.name,
-    gender: doc.gender,
-    gender_probability: doc.gender_probability,
-    sample_size: doc.sample_size,
-    age: doc.age,
-    age_group: doc.age_group,
-    country_id: doc.country_id,
-    country_probability: doc.country_probability,
-    created_at: doc.created_at,
-  };
-}
+const formatDocument = formatProfileDocument;
 
 function successPayload(doc, message) {
   const payload = {
@@ -42,16 +30,7 @@ function successPayload(doc, message) {
   return payload;
 }
 
-function formatListDocument(doc) {
-  return {
-    id: doc.id,
-    name: doc.name,
-    gender: doc.gender,
-    age: doc.age,
-    age_group: doc.age_group,
-    country_id: doc.country_id,
-  };
-}
+const formatListDocument = formatProfileDocument;
 
 function normalizeName(name, requiredMessage = 'Name is required') {
   if (name === undefined || name === null || name === '') {
@@ -241,10 +220,10 @@ function createProfilesRouteHandlers({
       name: normalizedName,
       gender: enriched.gender,
       gender_probability: enriched.gender_probability,
-      sample_size: enriched.sample_size,
       age: enriched.age,
       age_group,
       country_id: enriched.country_id,
+      country_name: enriched.country_name,
       country_probability: enriched.country_probability,
       created_at,
     };

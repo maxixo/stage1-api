@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server.js';
 import { getCollection } from '../../../../lib/db.js';
+import { formatProfileDocument } from '../../../../lib/profile-shape.js';
 
 export const runtime = 'nodejs';
 
@@ -9,20 +10,7 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-function formatDocument(doc) {
-  return {
-    id: doc.id,
-    name: doc.name,
-    gender: doc.gender,
-    gender_probability: doc.gender_probability,
-    sample_size: doc.sample_size,
-    age: doc.age,
-    age_group: doc.age_group,
-    country_id: doc.country_id,
-    country_probability: doc.country_probability,
-    created_at: doc.created_at,
-  };
-}
+const formatDocument = formatProfileDocument;
 
 function normalizeId(id) {
   if (id === undefined || id === null || id === '') {

@@ -85,9 +85,9 @@ test('enrichProfile calls Genderize, Agify, and Nationalize with exact URLs', as
   assert.deepEqual(profile, {
     gender: 'male',
     gender_probability: 0.99,
-    sample_size: 1500,
     age: 31,
     country_id: 'PK',
+    country_name: 'Pakistan',
     country_probability: 0.78,
   });
 });
