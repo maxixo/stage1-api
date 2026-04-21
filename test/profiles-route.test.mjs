@@ -31,6 +31,7 @@ function createCursor(docs, queryState = {}) {
 function createCollection(overrides = {}) {
   return {
     find: () => createCursor([]),
+    countDocuments: async () => 0,
     findOne: async () => null,
     insertOne: async () => ({ acknowledged: true }),
     ...overrides,
@@ -147,8 +148,9 @@ test('parseProfileQuery rejects invalid query combinations', () => {
   );
 });
 
-test('GET returns a filtered profile list with normalized filters, sort, and pagination', async () => {
+test('GET returns a filtered paginated profile list with total count', async () => {
   let queriedFilter;
+  let countedFilter;
   const queryState = {};
   const { GET } = createHandlers({
     collection: createCollection({
@@ -172,6 +174,10 @@ test('GET returns a filtered profile list with normalized filters, sort, and pag
           queryState
         );
       },
+      countDocuments: async (filter) => {
+        countedFilter = filter;
+        return 7;
+      },
     }),
   });
 
@@ -191,6 +197,7 @@ test('GET returns a filtered profile list with normalized filters, sort, and pag
     gender_probability: { $gte: 0.75 },
     country_probability: { $gte: 0.5 },
   });
+  assert.deepEqual(countedFilter, queriedFilter);
   assert.deepEqual(queryState, {
     sort: { age: -1 },
     skip: 25,
@@ -198,7 +205,9 @@ test('GET returns a filtered profile list with normalized filters, sort, and pag
   });
   assert.deepEqual(payload, {
     status: 'success',
-    count: 1,
+    page: 2,
+    limit: 25,
+    total: 7,
     data: [
       {
         id: 'id-1',
@@ -218,6 +227,7 @@ test('GET returns a filtered profile list with normalized filters, sort, and pag
 
 test('GET returns all profiles when no supported filters are supplied', async () => {
   let queriedFilter;
+  let countedFilter;
   const queryState = {};
   const { GET } = createHandlers({
     collection: createCollection({
@@ -251,6 +261,10 @@ test('GET returns all profiles when no supported filters are supplied', async ()
           queryState
         );
       },
+      countDocuments: async (filter) => {
+        countedFilter = filter;
+        return 2;
+      },
     }),
   });
 
@@ -259,46 +273,80 @@ test('GET returns all profiles when no supported filters are supplied', async ()
 
   assert.equal(response.status, 200);
   assert.deepEqual(queriedFilter, {});
+  assert.deepEqual(countedFilter, {});
   assert.deepEqual(queryState, {
     skip: 0,
     limit: 10,
   });
-  assert.equal(payload.count, 2);
-  assert.deepEqual(payload.data, [
-    {
-      id: 'id-1',
-      name: 'emmanuel',
-      gender: 'male',
-      gender_probability: 0.99,
-      age: 25,
-      age_group: 'adult',
-      country_id: 'NG',
-      country_name: 'Nigeria',
-      country_probability: 0.8,
-      created_at: '2026-04-15T08:00:00Z',
-    },
-    {
-      id: 'id-2',
-      name: 'sarah',
-      gender: 'female',
-      gender_probability: 0.97,
-      age: 28,
-      age_group: 'adult',
-      country_id: 'US',
-      country_name: 'United States',
-      country_probability: 0.72,
-      created_at: '2026-04-16T08:00:00Z',
-    },
-  ]);
+  assert.deepEqual(payload, {
+    status: 'success',
+    page: 1,
+    limit: 10,
+    total: 2,
+    data: [
+      {
+        id: 'id-1',
+        name: 'emmanuel',
+        gender: 'male',
+        gender_probability: 0.99,
+        age: 25,
+        age_group: 'adult',
+        country_id: 'NG',
+        country_name: 'Nigeria',
+        country_probability: 0.8,
+        created_at: '2026-04-15T08:00:00Z',
+      },
+      {
+        id: 'id-2',
+        name: 'sarah',
+        gender: 'female',
+        gender_probability: 0.97,
+        age: 28,
+        age_group: 'adult',
+        country_id: 'US',
+        country_name: 'United States',
+        country_probability: 0.72,
+        created_at: '2026-04-16T08:00:00Z',
+      },
+    ],
+  });
+});
+
+test('GET returns paginated metadata even when the page has fewer rows than the total', async () => {
+  const { GET } = createHandlers({
+    collection: createCollection({
+      find: () => createCursor([]),
+      countDocuments: async () => 12,
+    }),
+  });
+
+  const response = await GET(
+    new Request('http://localhost:3000/api/profiles?page=2&limit=10')
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(payload, {
+    status: 'success',
+    page: 2,
+    limit: 10,
+    total: 12,
+    data: [],
+  });
 });
 
 test('GET returns the exact invalid query error body for bad query params', async () => {
   let findCalled = false;
+  let countCalled = false;
   const { GET } = createHandlers({
     collection: createCollection({
       find: () => {
         findCalled = true;
         return createCursor([]);
+      },
+      countDocuments: async () => {
+        countCalled = true;
+        return 0;
       },
     }),
   });
@@ -310,9 +358,30 @@ test('GET returns the exact invalid query error body for bad query params', asyn
 
   assert.equal(response.status, 400);
   assert.equal(findCalled, false);
+  assert.equal(countCalled, false);
   assert.deepEqual(payload, {
     status: 'error',
     message: 'Invalid query parameters',
+  });
+});
+
+test('GET returns a database error when counting documents fails', async () => {
+  const { GET } = createHandlers({
+    collection: createCollection({
+      find: () => createCursor([]),
+      countDocuments: async () => {
+        throw new Error('count failed');
+      },
+    }),
+  });
+
+  const response = await GET(new Request('http://localhost:3000/api/profiles'));
+  const payload = await response.json();
+
+  assert.equal(response.status, 500);
+  assert.deepEqual(payload, {
+    status: 'error',
+    message: 'Database error',
   });
 });
 

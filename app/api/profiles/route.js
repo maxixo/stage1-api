@@ -110,20 +110,23 @@ function createProfilesRouteHandlers({
 
     try {
       let cursor = collection.find(querySpec.filter);
+      const totalPromise = collection.countDocuments(querySpec.filter);
 
       if (querySpec.sort) {
         cursor = cursor.sort(querySpec.sort);
       }
 
-      const docs = await cursor
-        .skip(querySpec.pagination.skip)
-        .limit(querySpec.pagination.limit)
-        .toArray();
+      const [total, docs] = await Promise.all([
+        totalPromise,
+        cursor.skip(querySpec.pagination.skip).limit(querySpec.pagination.limit).toArray(),
+      ]);
 
       return successResponse(
         {
           status: 'success',
-          count: docs.length,
+          page: querySpec.pagination.page,
+          limit: querySpec.pagination.limit,
+          total,
           data: docs.map(formatListDocument),
         },
         200
