@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "seed": "node scripts/seed-profiles.mjs",
     "start": "next start",
     "test": "node --env-file-if-exists=.env.local --test",
     "test:db": "node --env-file-if-exists=.env.local --test test/db.test.mjs"
