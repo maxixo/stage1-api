@@ -6,6 +6,7 @@ import {
   normalizeMongoUri,
   parseSrvHosts,
   parseTxtOptions,
+  PROFILE_INDEX_DEFINITIONS,
 } from '../lib/db.js';
 
 function createFakeMongoClientClass({ failConnect } = {}) {
@@ -112,14 +113,15 @@ test('connectDB reuses a cached client and ensures indexes once', async () => {
 
   assert.strictEqual(firstClient, secondClient);
   assert.equal(FakeMongoClient.instances.length, 1);
-  assert.deepEqual(FakeMongoClient.instances[0].indexCalls, [
-    {
+  assert.deepEqual(
+    FakeMongoClient.instances[0].indexCalls,
+    PROFILE_INDEX_DEFINITIONS.map(([keys, options]) => ({
       dbName: 'profile_db',
       collectionName: 'profiles',
-      keys: { name: 1 },
-      options: { unique: true },
-    },
-  ]);
+      keys,
+      options,
+    }))
+  );
 });
 
 test('getCollection returns the configured collection', async () => {
