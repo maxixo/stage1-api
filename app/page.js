@@ -1,6 +1,30 @@
 const endpoint = '/api/profiles';
-const filterExample = '/api/profiles?gender=male&country_id=NG';
-const idExample = '/api/profiles/b3f9c1e2-7d4a-4c91-9c2a-1f0a8e5b6d12';
+const listExample =
+  '/api/profiles?gender=female&country_id=NG&min_age=20&max_age=35&sort_by=gender_probability&order=desc&page=1&limit=10';
+const searchExample =
+  '/api/profiles/search?q=young%20females%20from%20nigeria&page=1&limit=5';
+const idExample = '/api/profiles/018f4f5c-6a90-7a33-b9d8-3c4f0e8b9f7a';
+const seedCommand = `npm run seed\n\n# optional custom source\nnpm run seed -- "https://drive.google.com/uc?export=download&id=1Up06dcS9OfUEnDj_u6OV_xTRntupFhPH"`;
+const listResponseExample = `{
+  "status": "success",
+  "page": 1,
+  "limit": 10,
+  "total": 2026,
+  "data": [
+    {
+      "id": "018f4f5c-6a90-7a33-b9d8-3c4f0e8b9f7a",
+      "name": "ella",
+      "gender": "female",
+      "gender_probability": 0.98,
+      "age": 28,
+      "age_group": "adult",
+      "country_id": "NG",
+      "country_name": "Nigeria",
+      "country_probability": 0.64,
+      "created_at": "2026-04-15T08:00:00Z"
+    }
+  ]
+}`;
 
 export default function HomePage() {
   return (
@@ -9,27 +33,35 @@ export default function HomePage() {
         <p style={styles.kicker}>Profile API</p>
         <h1 style={styles.title}>Spec-compliant profile enrichment and retrieval.</h1>
         <p style={styles.description}>
-          This service accepts a name, enriches it with gender, age, and
-          nationality signals, classifies the age group, stores the result
-          idempotently in MongoDB, and exposes list, fetch, and delete routes.
+          This service enriches names into spec-compliant stored profiles,
+          supports advanced AND-style filtering, validated sorting and
+          pagination, deterministic natural-language search, and idempotent
+          seeding into MongoDB.
         </p>
         <div style={styles.actions}>
           <a href={endpoint} style={styles.link}>
-            Endpoint
+            List Endpoint
           </a>
-          <a href={filterExample} style={styles.secondaryLink}>
-            Filtered GET
+          <a href={searchExample} style={styles.secondaryLink}>
+            Search Example
           </a>
-          <span style={styles.badge}>GET, POST, DELETE</span>
+          <span style={styles.badge}>GET, POST, DELETE, SEARCH</span>
         </div>
       </section>
 
       <section style={styles.grid}>
         <article style={styles.card}>
-          <h2 style={styles.sectionTitle}>List</h2>
-          <pre style={styles.code}>{`GET ${filterExample}`}</pre>
+          <h2 style={styles.sectionTitle}>Advanced List</h2>
+          <pre style={styles.code}>{`GET ${listExample}`}</pre>
         </article>
 
+        <article style={styles.card}>
+          <h2 style={styles.sectionTitle}>Natural-Language Search</h2>
+          <pre style={styles.code}>{`GET ${searchExample}`}</pre>
+        </article>
+      </section>
+
+      <section style={styles.grid}>
         <article style={styles.card}>
           <h2 style={styles.sectionTitle}>Create</h2>
           <pre style={styles.code}>{`POST ${endpoint}
@@ -38,6 +70,11 @@ Content-Type: application/json
 {
   "name": "ella"
 }`}</pre>
+        </article>
+
+        <article style={styles.card}>
+          <h2 style={styles.sectionTitle}>Seed Pipeline</h2>
+          <pre style={styles.code}>{seedCommand}</pre>
         </article>
       </section>
 
@@ -55,11 +92,28 @@ Content-Type: application/json
 
       <section style={styles.grid}>
         <article style={styles.panel}>
-          <h2 style={styles.sectionTitle}>Behavior</h2>
+          <h2 style={styles.sectionTitle}>Capabilities</h2>
           <ul style={styles.list}>
             <li>Enriches from three external APIs concurrently</li>
             <li>Classifies age as child, teenager, adult, or senior</li>
-            <li>Lists stored profiles with optional case-insensitive filters</li>
+            <li>Supports combined filters, validated sort fields, and capped pagination</li>
+            <li>Parses rule-based search phrases like `young females from nigeria`</li>
+            <li>Seeds the 2026 dataset idempotently by normalized name</li>
+          </ul>
+        </article>
+
+        <article style={styles.panel}>
+          <h2 style={styles.sectionTitle}>Response Shape</h2>
+          <pre style={styles.code}>{listResponseExample}</pre>
+        </article>
+      </section>
+
+      <section style={styles.grid}>
+        <article style={styles.panel}>
+          <h2 style={styles.sectionTitle}>Validation</h2>
+          <ul style={styles.list}>
+            <li>List and search queries return `Invalid query parameters` on bad filters</li>
+            <li>Uninterpretable search phrases return `Unable to interpret query`</li>
             <li>Prevents duplicates with MongoDB uniqueness and idempotent POST</li>
           </ul>
         </article>
@@ -67,7 +121,7 @@ Content-Type: application/json
         <article style={styles.panel}>
           <h2 style={styles.sectionTitle}>Responses</h2>
           <ul style={styles.list}>
-            <li>`200` for successful GET list, GET by id, or repeated POST</li>
+            <li>`200` for successful list, search, fetch by id, or repeated POST</li>
             <li>`201` for a new stored profile</li>
             <li>`204` for a successful delete</li>
             <li>`400`, `422`, `404`, `502`, or `500` for error paths</li>
