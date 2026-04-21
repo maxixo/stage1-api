@@ -4,12 +4,33 @@ import {
   buildProfilesFilter,
   createProfilesRouteHandlers,
 } from '../app/api/profiles/route.js';
+import {
+  QUERY_ERROR_MESSAGE,
+  parseProfileQuery,
+  ProfileQueryValidationError,
+} from '../lib/profile-query.js';
+
+function createCursor(docs, queryState = {}) {
+  return {
+    sort(sortSpec) {
+      queryState.sort = sortSpec;
+      return this;
+    },
+    skip(skip) {
+      queryState.skip = skip;
+      return this;
+    },
+    limit(limit) {
+      queryState.limit = limit;
+      return this;
+    },
+    toArray: async () => docs,
+  };
+}
 
 function createCollection(overrides = {}) {
   return {
-    find: () => ({
-      toArray: async () => [],
-    }),
+    find: () => createCursor([]),
     findOne: async () => null,
     insertOne: async () => ({ acknowledged: true }),
     ...overrides,
@@ -34,12 +55,6 @@ function createHandlers({ collection, ...overrides } = {}) {
   });
 }
 
-function assertExactCaseInsensitiveMatch(actual, expected) {
-  assert.ok(actual instanceof RegExp);
-  assert.equal(actual.source, `^${expected}$`);
-  assert.equal(actual.flags, 'i');
-}
-
 test('OPTIONS returns CORS headers for GET and POST', async () => {
   const { OPTIONS } = createHandlers();
 
@@ -52,25 +67,95 @@ test('OPTIONS returns CORS headers for GET and POST', async () => {
   );
 });
 
-test('buildProfilesFilter creates case-insensitive filters for supported params', () => {
-  const filter = buildProfilesFilter(
-    new URLSearchParams('Gender=MALE&country_id=ng&AGE_GROUP=adult&ignored=x')
-  );
+test('buildProfilesFilter creates equality and range filters from normalized params', () => {
+  const filter = buildProfilesFilter({
+    gender: 'male',
+    age_group: 'adult',
+    country_id: 'NG',
+    min_age: 18,
+    max_age: 35,
+    min_gender_probability: 0.8,
+    min_country_probability: 0.5,
+  });
 
-  assert.deepEqual(Object.keys(filter).sort(), ['age_group', 'country_id', 'gender']);
-  assertExactCaseInsensitiveMatch(filter.gender, 'MALE');
-  assertExactCaseInsensitiveMatch(filter.country_id, 'ng');
-  assertExactCaseInsensitiveMatch(filter.age_group, 'adult');
+  assert.deepEqual(filter, {
+    gender: 'male',
+    age_group: 'adult',
+    country_id: 'NG',
+    age: { $gte: 18, $lte: 35 },
+    gender_probability: { $gte: 0.8 },
+    country_probability: { $gte: 0.5 },
+  });
 });
 
-test('GET returns a filtered profile list with count', async () => {
+test('parseProfileQuery normalizes filters and builds sort and pagination metadata', () => {
+  const query = parseProfileQuery(
+    new URLSearchParams(
+      'Gender=MALE&country_id=ng&AGE_GROUP=adult&min_age=18&max_age=35&min_gender_probability=0.8&min_country_probability=.5&sort_by=gender_probability&order=DESC&page=2&limit=100'
+    )
+  );
+
+  assert.deepEqual(query.filter, {
+    gender: 'male',
+    age_group: 'adult',
+    country_id: 'NG',
+    age: { $gte: 18, $lte: 35 },
+    gender_probability: { $gte: 0.8 },
+    country_probability: { $gte: 0.5 },
+  });
+  assert.deepEqual(query.sort, { gender_probability: -1 });
+  assert.deepEqual(query.pagination, {
+    page: 2,
+    limit: 50,
+    skip: 50,
+  });
+});
+
+test('parseProfileQuery rejects unsupported enum values with the exact error message', () => {
+  assert.throws(
+    () => parseProfileQuery(new URLSearchParams('gender=robot')),
+    (error) => {
+      assert.ok(error instanceof ProfileQueryValidationError);
+      assert.equal(error.status, 400);
+      assert.equal(error.message, QUERY_ERROR_MESSAGE);
+      return true;
+    }
+  );
+});
+
+test('parseProfileQuery rejects non-numeric numeric params with 422', () => {
+  assert.throws(
+    () => parseProfileQuery(new URLSearchParams('min_age=old')),
+    (error) => {
+      assert.ok(error instanceof ProfileQueryValidationError);
+      assert.equal(error.status, 422);
+      assert.equal(error.message, QUERY_ERROR_MESSAGE);
+      return true;
+    }
+  );
+});
+
+test('parseProfileQuery rejects invalid query combinations', () => {
+  assert.throws(
+    () => parseProfileQuery(new URLSearchParams('min_age=40&max_age=30')),
+    (error) => {
+      assert.ok(error instanceof ProfileQueryValidationError);
+      assert.equal(error.status, 400);
+      assert.equal(error.message, QUERY_ERROR_MESSAGE);
+      return true;
+    }
+  );
+});
+
+test('GET returns a filtered profile list with normalized filters, sort, and pagination', async () => {
   let queriedFilter;
+  const queryState = {};
   const { GET } = createHandlers({
     collection: createCollection({
       find: (filter) => {
         queriedFilter = filter;
-        return {
-          toArray: async () => [
+        return createCursor(
+          [
             {
               id: 'id-1',
               name: 'emmanuel',
@@ -84,22 +169,33 @@ test('GET returns a filtered profile list with count', async () => {
               created_at: '2026-04-15T08:00:00Z',
             },
           ],
-        };
+          queryState
+        );
       },
     }),
   });
 
   const response = await GET(
     new Request(
-      'http://localhost:3000/api/profiles?gender=MALE&country_id=ng&age_group=ADULT'
+      'http://localhost:3000/api/profiles?gender=MALE&country_id=ng&age_group=ADULT&min_age=20&max_age=30&min_gender_probability=0.75&min_country_probability=0.5&sort_by=age&order=desc&page=2&limit=25'
     )
   );
   const payload = await response.json();
 
   assert.equal(response.status, 200);
-  assertExactCaseInsensitiveMatch(queriedFilter.gender, 'MALE');
-  assertExactCaseInsensitiveMatch(queriedFilter.country_id, 'ng');
-  assertExactCaseInsensitiveMatch(queriedFilter.age_group, 'ADULT');
+  assert.deepEqual(queriedFilter, {
+    gender: 'male',
+    country_id: 'NG',
+    age_group: 'adult',
+    age: { $gte: 20, $lte: 30 },
+    gender_probability: { $gte: 0.75 },
+    country_probability: { $gte: 0.5 },
+  });
+  assert.deepEqual(queryState, {
+    sort: { age: -1 },
+    skip: 25,
+    limit: 25,
+  });
   assert.deepEqual(payload, {
     status: 'success',
     count: 1,
@@ -122,12 +218,13 @@ test('GET returns a filtered profile list with count', async () => {
 
 test('GET returns all profiles when no supported filters are supplied', async () => {
   let queriedFilter;
+  const queryState = {};
   const { GET } = createHandlers({
     collection: createCollection({
       find: (filter) => {
         queriedFilter = filter;
-        return {
-          toArray: async () => [
+        return createCursor(
+          [
             {
               id: 'id-1',
               name: 'emmanuel',
@@ -151,7 +248,8 @@ test('GET returns all profiles when no supported filters are supplied', async ()
               created_at: '2026-04-16T08:00:00Z',
             },
           ],
-        };
+          queryState
+        );
       },
     }),
   });
@@ -161,6 +259,10 @@ test('GET returns all profiles when no supported filters are supplied', async ()
 
   assert.equal(response.status, 200);
   assert.deepEqual(queriedFilter, {});
+  assert.deepEqual(queryState, {
+    skip: 0,
+    limit: 10,
+  });
   assert.equal(payload.count, 2);
   assert.deepEqual(payload.data, [
     {
@@ -188,6 +290,30 @@ test('GET returns all profiles when no supported filters are supplied', async ()
       created_at: '2026-04-16T08:00:00Z',
     },
   ]);
+});
+
+test('GET returns the exact invalid query error body for bad query params', async () => {
+  let findCalled = false;
+  const { GET } = createHandlers({
+    collection: createCollection({
+      find: () => {
+        findCalled = true;
+        return createCursor([]);
+      },
+    }),
+  });
+
+  const response = await GET(
+    new Request('http://localhost:3000/api/profiles?gender=robot')
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(findCalled, false);
+  assert.deepEqual(payload, {
+    status: 'error',
+    message: 'Invalid query parameters',
+  });
 });
 
 test('POST creates a new enriched profile', async () => {

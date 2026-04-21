@@ -4,6 +4,11 @@ import { getCollection } from '../../../lib/db.js';
 import { enrichProfile } from '../../../lib/enrichment.js';
 import { classifyAgeGroup } from '../../../lib/classify.js';
 import { formatProfileDocument } from '../../../lib/profile-shape.js';
+import {
+  buildProfilesFilter,
+  parseProfileQuery,
+  ProfileQueryValidationError,
+} from '../../../lib/profile-query.js';
 
 export const runtime = 'nodejs';
 
@@ -12,8 +17,6 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
-
-const FILTER_KEYS = ['gender', 'country_id', 'age_group'];
 
 const formatDocument = formatProfileDocument;
 
@@ -48,47 +51,6 @@ function normalizeName(name, requiredMessage = 'Name is required') {
   }
 
   return { normalizedName };
-}
-
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function getSearchParam(searchParams, key) {
-  for (const [entryKey, value] of searchParams.entries()) {
-    if (entryKey.toLowerCase() === key) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-function normalizeFilterValue(value) {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const normalizedValue = value.trim();
-
-  return normalizedValue === '' ? null : normalizedValue;
-}
-
-function buildProfilesFilter(searchParams) {
-  const filter = {};
-
-  for (const key of FILTER_KEYS) {
-    const rawValue = getSearchParam(searchParams, key);
-    const normalizedValue = normalizeFilterValue(rawValue);
-
-    if (!normalizedValue) {
-      continue;
-    }
-
-    filter[key] = new RegExp(`^${escapeRegex(normalizedValue)}$`, 'i');
-  }
-
-  return filter;
 }
 
 function createResponseHelpers(NextResponseClass) {
@@ -134,10 +96,29 @@ function createProfilesRouteHandlers({
       return errorResponse(500, 'Database error');
     }
 
-    const filter = buildProfilesFilter(new URL(request.url).searchParams);
+    let querySpec;
 
     try {
-      const docs = await collection.find(filter).toArray();
+      querySpec = parseProfileQuery(new URL(request.url).searchParams);
+    } catch (error) {
+      if (error instanceof ProfileQueryValidationError) {
+        return errorResponse(error.status, error.message);
+      }
+
+      return errorResponse(500, 'Database error');
+    }
+
+    try {
+      let cursor = collection.find(querySpec.filter);
+
+      if (querySpec.sort) {
+        cursor = cursor.sort(querySpec.sort);
+      }
+
+      const docs = await cursor
+        .skip(querySpec.pagination.skip)
+        .limit(querySpec.pagination.limit)
+        .toArray();
 
       return successResponse(
         {
