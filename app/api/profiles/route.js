@@ -9,6 +9,7 @@ import {
   parseProfileQuery,
   ProfileQueryValidationError,
 } from '../../../lib/profile-query.js';
+import { executeProfileListQuery } from '../../../lib/profile-list.js';
 
 export const runtime = 'nodejs';
 
@@ -109,28 +110,7 @@ function createProfilesRouteHandlers({
     }
 
     try {
-      let cursor = collection.find(querySpec.filter);
-      const totalPromise = collection.countDocuments(querySpec.filter);
-
-      if (querySpec.sort) {
-        cursor = cursor.sort(querySpec.sort);
-      }
-
-      const [total, docs] = await Promise.all([
-        totalPromise,
-        cursor.skip(querySpec.pagination.skip).limit(querySpec.pagination.limit).toArray(),
-      ]);
-
-      return successResponse(
-        {
-          status: 'success',
-          page: querySpec.pagination.page,
-          limit: querySpec.pagination.limit,
-          total,
-          data: docs.map(formatListDocument),
-        },
-        200
-      );
+      return successResponse(await executeProfileListQuery(collection, querySpec), 200);
     } catch {
       return errorResponse(500, 'Database error');
     }
